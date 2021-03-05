@@ -91,11 +91,11 @@ class ReferenceAlignment(object):
         rpos = qpos = 0
         for apos in range(self.alen):
             rb, qb = self.aln_positions[apos]
-            if rb is not '.':
+            if rb != '.':
                 self._rpos_to_apos[rpos] = apos
                 self._apos_to_rpos[apos] = rpos
                 rpos += 1
-            if qb is not '.':
+            if qb != '.':
                 self._qpos_to_apos[qpos] = apos
                 self._apos_to_qpos[apos] = qpos
                 qpos += 1

@@ -56,7 +56,7 @@ def parse_vcf_file(file, reg):
         count = 0
         lines = infile.read().splitlines()
         for line in lines:
-            if line[0] is not '#' and len(line) > 0 and reg in line:
+            if line[0] != '#' and len(line) > 0 and reg in line:
                 count += 1
     return count
 

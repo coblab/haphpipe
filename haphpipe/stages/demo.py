@@ -40,13 +40,14 @@ def stageparser(parser):
 
     """
     group1 = parser.add_argument_group('Input/Output')
-    group1.add_argument('--outdir', type=sysutils.new_or_existing_dir, default='.',
+    group1.add_argument('--outdir', type=sysutils.new_or_existing_dir,
+                        default='haphpipe_demo',
                         help='Output directory')
     group1.add_argument('--refonly', action='store_true',
                         help='Does not run entire demo, only pulls the reference files')
     parser.set_defaults(func=demo)
 
-def demo(outdir=".", refonly=False):
+def demo(outdir="haphpipe_demo", refonly=False):
     try:
         _ = FileNotFoundError()
     except NameError:
@@ -62,14 +63,7 @@ def demo(outdir=".", refonly=False):
     #return
     #_data = os.path.join(_base, 'data')
 
-    if not os.path.exists(outdir):
-        os.makedirs(outdir)
-
-    hpd = os.path.join(outdir, 'haphpipe_demo')
-    if not os.path.exists(hpd):
-        os.makedirs(hpd)
-
-    refs = os.path.join(outdir, 'haphpipe_demo/refs.tar.gz')
+    refs = os.path.join(outdir, 'refs.tar.gz')
 
     # download ref command
     cmd1 = [
@@ -82,7 +76,7 @@ def demo(outdir=".", refonly=False):
 
     # unzip refs
     cmd2 = [
-        'tar', '-xzvf', 'haphpipe_demo/refs.tar.gz', '-C', hpd
+        'tar', '-xzvf', refs, '-C', outdir
     ]
     cmd3 = ['rm', refs]
 
