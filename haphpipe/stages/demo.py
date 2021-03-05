@@ -40,7 +40,7 @@ def stageparser(parser):
 
     """
     group1 = parser.add_argument_group('Input/Output')
-    group1.add_argument('--outdir', type=sysutils.existing_dir, default='.',
+    group1.add_argument('--outdir', type=sysutils.new_or_existing_dir, default='.',
                         help='Output directory')
     group1.add_argument('--refonly', action='store_true',
                         help='Does not run entire demo, only pulls the reference files')

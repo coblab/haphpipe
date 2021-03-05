@@ -186,6 +186,25 @@ def existing_dir(f):
     return f
 
 
+def new_or_existing_dir(f):
+    """
+    'Type' for argparse - checks that file exists but does not open.
+    """
+    if os.path.isdir(f):
+        return f
+    if os.path.isfile(f):
+        raise argparse.ArgumentTypeError("{0} is a file".format(f))
+    
+    if not os.path.exists(f):
+        try:
+            os.makedirs(f)
+            return f
+        except Exception as inst:
+            raise argparse.ArgumentTypeError("ERROR: {0}".format(str(inst)))
+    else:
+        raise argparse.ArgumentTypeError("{0} unexpectedly exist".format(f))
+
+
 def args_params(args):
     """ Returns a dictionary from argparse namespace
         Excludes "func" argument
