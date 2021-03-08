@@ -37,74 +37,59 @@ def stageparser(parser):
 
     Returns:
         None
-
+    
     """
     group1 = parser.add_argument_group('Input/Output')
     group1.add_argument('--outdir', type=sysutils.new_or_existing_dir,
-                        default='haphpipe_demo',
-                        help='Output directory')
+                        default='./demo',
+                        help='Output directory.')
     group1.add_argument('--refonly', action='store_true',
                         help='Does not run entire demo, only pulls the reference files')
     parser.set_defaults(func=demo)
 
-def demo(outdir="haphpipe_demo", refonly=False):
-    try:
-        _ = FileNotFoundError()
-    except NameError:
-        class FileNotFoundError(OSError):
-            pass
 
-    # This file, demo.py, is located within "stages", so the package root is
-    # up one directory
-    _base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    #_data = os.path.abspath(os.path.join(_base,'refs'))
-    #_data = os.path.abspath(os.path.join(os.path.dirname(_base), 'bin/refs'))
-    #print(_data)
-    #return
-    #_data = os.path.join(_base, 'data')
-
-    refs = os.path.join(outdir, 'refs.tar.gz')
-
-    # download ref command
-    cmd1 = [
-        'curl', '-L', 'https://github.com/gwcbi/haphpipe/blob/master/bin/refs.tar.gz?raw=true', '>', refs
-    ]
-
-    sysutils.command_runner(
-        [cmd1, ], 'refs'
-    )
-
-    # unzip refs
-    cmd2 = [
-        'tar', '-xzvf', refs, '-C', outdir
-    ]
-    cmd3 = ['rm', refs]
-
-    sysutils.command_runner(
-        [cmd2, cmd3, ], 'refs'
-    )
-
-    #dest = os.path.abspath(outdir)
-    #if not os.path.exists(os.path.join(outdir,))
-
-    print(_base, file=sys.stderr)
-
-    if refonly is False:
-        print("Setting up demo directories and references in outdirectory %s. Demo samples will now run." % os.path.join(outdir, 'haphpipe_demo'))
-
-        # Check for executable
-        sysutils.check_dependency("fastq-dump")
-
-        # Demo command
+def demo(outdir="./demo", refonly=False):
+    """ Get references """
+    req_files = ['HIV_B.K03455.HXB2.amplicons.fasta',
+                 'HIV_B.K03455.HXB2.fasta',
+                 'HIV_B.K03455.HXB2.gtf',
+                 ]
+    getrefs = any(not os.path.exists(os.path.join(outdir, 'refs', f)) for f in req_files)
+    
+    if getrefs:
+        ref_gz = os.path.join(outdir, 'refs.tar.gz')
+        # download ref command
         cmd1 = [
-            'haphpipe_demo', 'haphpipe_demo'
+            'curl',
+            '-L',
+            'https://github.com/gwcbi/haphpipe/blob/master/bin/refs.tar.gz?raw=true',
+            '>',
+            ref_gz,
         ]
-
+        # unzip refs
+        cmd2 = ['tar', '-xzvf', ref_gz, '-C', outdir, ]
+        cmd3 = ['rm', ref_gz, ]
         sysutils.command_runner(
-            [cmd1, ], 'demo'
+            [cmd1, cmd2, cmd3, ], 'refs'
         )
     else:
-        print("Demo was run with --refonly. References are now in outdirectory: %s." %refs)
+        print('References found at %s.' % os.path.join(outdir, 'refs'))
+    
+    if refonly:
+        print("Complete: Demo was run with --refonly.")
+        return
+    
+    print("Running demo in %s." % os.path.join(outdir))
+    
+    # Check for executable
+    sysutils.check_dependency("fastq-dump")
+    
+    # Demo command
+    cmd1 = ['haphpipe_demo', outdir, ]
+    sysutils.command_runner(
+        [cmd1, ], 'demo'
+    )
+
 
 def console():
     """ Entry point

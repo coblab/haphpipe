@@ -61,6 +61,10 @@ mkdir -p $outdir/refs
 echo "[---$SN---] ($(date)) outdir:            $outdir"
 echo "[---$SN---] ($(date)) num CPU:           $ncpu"
 
+
+#--- Check for PredictHaplo
+command -v PredictHaplo-Paired >/dev/null 2>&1 && HASPH="YES" || HASPH="NO"
+
 #--- Start the timer
 t1=$(date +"%s")
 
@@ -130,16 +134,16 @@ EOF
 fi
 
 # Step 3: PredictHaplo
-stage="predict_haplo"
-echo -e "\n[---$SN---] ($(date)) Stage: $stage"
-
-if [[ -e ${outdir}/${sra}/${pipeline}/ph_haplotypes_comb.fna ]]; then
-    echo "[---$SN---] ($(date)) EXISTS: $stage corrected_1.fastq,corrected_2.fastq"
-else
- command -v PredictHaplo-Paired >/dev/null 2>&1 ||
- if [[ $? -eq 0 ]] ; then
-    echo -e "[---$SN---] ($(date)) $stage PredictHaplo present"
-    read -r -d '' cmd1 <<EOF
+if [[ "$HASPH" == "YES" ]]; then
+    stage="predict_haplo"
+    echo -e "\n[---$SN---] ($(date)) Stage: $stage"
+    
+    OUTFA="${outdir}/${sra}/${pipeline}/ph_haplotypes_comb.fna"
+    if [[ -e $OUTFA ]]; then
+        echo "[---$SN---] ($(date)) EXISTS: $OUTFA"
+    else
+        echo -e "[---$SN---] ($(date)) $stage PredictHaplo present"
+        read -r -d '' cmd1 <<EOF
 haphpipe predict_haplo\
  --fq1 ${outdir}/${sra}/${pipeline}/corrected_1.fastq\
  --fq2 ${outdir}/${sra}/${pipeline}/corrected_2.fastq\
@@ -147,28 +151,27 @@ haphpipe predict_haplo\
  --logfile ${outdir}/${sra}/${pipeline}/haphpipe_PH.out\
  --outdir ${outdir}/${sra}/${pipeline}
 EOF
-    echo -e "[---$SN---] ($(date)) $stage command:\n\n$cmd1\n"
-    eval $cmd1
+        echo -e "[---$SN---] ($(date)) $stage command:\n\n$cmd1\n"
+        eval $cmd1
 
-    for ph in ${outdir}/${sra}/${pipeline}/PH*; do
-        read -r -d '' cmd2 <<EOF
+        for ph in ${outdir}/${sra}/${pipeline}/PH*; do
+           read -r -d '' cmd2 <<EOF
  haphpipe ph_parser\
  --haplotypes_fa $ph/PH*.best_*.fas\
  --logfile ${outdir}/${sra}/${pipeline}/haphpipe_PH.out\
  --outdir ${ph}\
  --prefix ${sra}_$(basename $ph)
 EOF
-       echo -e "[---$SN---] ($(date)) $stage command:\n\n$cmd2\n"
-       eval $cmd2
+           echo -e "[---$SN---] ($(date)) $stage command:\n\n$cmd2\n"
+           eval $cmd2
 
-       cat ${outdir}/${sra}/${pipeline}/PH*/ph_haplotypes.fna > ${outdir}/${sra}/${pipeline}/ph_haplotypes_comb.fna
-     done
- fi
+           cat ${outdir}/${sra}/${pipeline}/PH*/ph_haplotypes.fna >> ${outdir}/${sra}/${pipeline}/ph_haplotypes_comb.fna
+         done
+    fi
 
     [[ $? -eq 0 ]] && echo "[---$SN---] ($(date)) COMPLETED: $stage" || \
         (  echo "[---$SN---] ($(date)) FAILED: $stage" && exit 1 )
 fi
-
 }
 
 ###############################################################################
@@ -287,36 +290,12 @@ fi
 stage="build_tree_NG"
 echo -e "\n[---$SN---] ($(date)) Stage: $stage"
 
-if [[ -e ${outdir}/hp_tree/alignment_region00.raxml.support ]] &&\
-   [[ -e ${outdir}/hp_tree/alignment_region01.raxml.support ]] &&\
-   [[ -e ${outdir}/hp_tree/alignment_region02.raxml.support ]]; then
-    echo "[---$SN---] ($(date)) EXISTS: $stage alignment_region00.raxml.support, alignment_region01.raxml.support, alignment_region02.raxml.support"
-else
-    # check for PredictHaplo
-    command -v PredictHaplo-Paired >/dev/null 2>&1
-    if [[ $? -eq 0 ]] ; then
-        for alignment in ${outdir}/hp_alignments/alignment_region??.phy; do
+for alignment in ${outdir}/hp_alignments/alignment_region??.phy; do
             reg=${alignment%.phy}
-            read -r -d '' cmd <<EOF
-haphpipe build_tree_NG\
- --all\
- --seqs ${alignment}\
- --output_name $(basename $reg)\
- --model GTR+I\
- --logfile ${outdir}/haphpipe.out\
- --outdir ${outdir}\
---in_type PHYLIP
-EOF
-            echo -e "[---$SN---] ($(date)) $stage command:\n\n$cmd\n"
-            eval $cmd
-
-            [[ $? -eq 0 ]] && echo "[---$SN---] ($(date)) COMPLETED: $stage" || \
-                (  echo "[---$SN---] ($(date)) FAILED: $stage" && exit 1 )
-        done
-    else
-        for alignment in ${outdir}/hp_alignments/alignment_region00.phy ${outdir}/hp_alignments/alignment_region01.phy; do
-            reg=${alignment%.phy}
-            read -r -d '' cmd <<EOF
+            if [[ ! -e ${outdir}/hp_tree/$(basename $reg).raxml.support ]]; then
+                nsq=$(head -n1 $alignment | cut -d' ' -f2)
+                if [[ "$nsq" -gt "3" ]]; then
+                    read -r -d '' cmd <<EOF
 haphpipe build_tree_NG\
  --all\
  --seqs ${alignment}\
@@ -326,14 +305,79 @@ haphpipe build_tree_NG\
  --outdir ${outdir}\
  --in_type PHYLIP
 EOF
-            echo -e "[---$SN---] ($(date)) $stage command:\n\n$cmd\n"
-            eval $cmd
+                    echo -e "[---$SN---] ($(date)) $stage command:\n\n$cmd\n"
+                    eval $cmd
 
-            [[ $? -eq 0 ]] && echo "[---$SN---] ($(date)) COMPLETED: $stage" && echo "NOTE: region02 did not run because there are only 3 sequences in the alignment" || \
-                (  echo "[---$SN---] ($(date)) FAILED: $stage" && exit 1 )
-        done
-    fi
-fi
+                    [[ $? -eq 0 ]] && echo "[---$SN---] ($(date)) COMPLETED: $stage" || \
+                        (  echo "[---$SN---] ($(date)) FAILED: $stage" && exit 1 )
+                else
+                    echo "[---$SN---] ($(date)) FAIL:   $alignment did not run, only $nsq sequences in file"
+                fi
+            else
+                echo "[---$SN---] ($(date)) EXISTS: ${outdir}/hp_tree/$(basename $reg).raxml.support"
+            fi
+done
+            
+#             
+# 
+#             
+#             
+#             
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# if [[ -e ${outdir}/hp_tree/alignment_region00.raxml.support ]] &&\
+#    [[ -e ${outdir}/hp_tree/alignment_region01.raxml.support ]] &&\
+#    [[ -e ${outdir}/hp_tree/alignment_region02.raxml.support ]]; then
+#     echo "[---$SN---] ($(date)) EXISTS: $stage alignment_region00.raxml.support, alignment_region01.raxml.support, alignment_region02.raxml.support"
+# else
+#     # check for PredictHaplo
+#     command -v PredictHaplo-Paired >/dev/null 2>&1
+#     if [[ $? -eq 0 ]] ; then
+#         for alignment in ${outdir}/hp_alignments/alignment_region??.phy; do
+#             reg=${alignment%.phy}
+#             read -r -d '' cmd <<EOF
+# haphpipe build_tree_NG\
+#  --all\
+#  --seqs ${alignment}\
+#  --output_name $(basename $reg)\
+#  --model GTR+I\
+#  --logfile ${outdir}/haphpipe.out\
+#  --outdir ${outdir}\
+# --in_type PHYLIP
+# EOF
+#             echo -e "[---$SN---] ($(date)) $stage command:\n\n$cmd\n"
+#             eval $cmd
+# 
+#             [[ $? -eq 0 ]] && echo "[---$SN---] ($(date)) COMPLETED: $stage" || \
+#                 (  echo "[---$SN---] ($(date)) FAILED: $stage" && exit 1 )
+#         done
+#     else
+#         for alignment in ${outdir}/hp_alignments/alignment_region00.phy ${outdir}/hp_alignments/alignment_region01.phy; do
+#             reg=${alignment%.phy}
+#             read -r -d '' cmd <<EOF
+# haphpipe build_tree_NG\
+#  --all\
+#  --seqs ${alignment}\
+#  --output_name $(basename $reg)\
+#  --model GTR+I\
+#  --logfile ${outdir}/haphpipe.out\
+#  --outdir ${outdir}\
+#  --in_type PHYLIP
+# EOF
+#             echo -e "[---$SN---] ($(date)) $stage command:\n\n$cmd\n"
+#             eval $cmd
+# 
+#             [[ $? -eq 0 ]] && echo "[---$SN---] ($(date)) COMPLETED: $stage" && echo "NOTE: region02 did not run because there are only 3 sequences in the alignment" || \
+#                 (  echo "[---$SN---] ($(date)) FAILED: $stage" && exit 1 )
+#         done
+#     fi
+# fi
 
 #---Complete job
 t2=$(date +"%s")
