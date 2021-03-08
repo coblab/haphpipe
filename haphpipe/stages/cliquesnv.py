@@ -3,6 +3,7 @@ import os
 import sys
 import argparse
 import shutil
+import json
 
 from past.utils import old_div
 from Bio import SeqIO
@@ -37,7 +38,7 @@ def stageparser(parser):
     group1.add_argument('--outdir',type=sysutils.existing_dir,default='.',help='Output directory')
 
     group2 = parser.add_argument_group('CliqueSNV Options')
-    group2.add_argument('--jardir',type=str,default='.',help='Path to clique-snv.jar (existing) (Default: current directory)')
+    group2.add_argument('--jardir',type=str,help='Path to clique-snv.jar (existing) (Default: current directory)')
     group2.add_argument('--O22min',type=float,help="minimum threshold for O22 value")
     group2.add_argument('--O22minfreq',type=float,help="minimum threshold for O22 frequency relative to read coverage")
     group2.add_argument('--printlog',action='store_true',help="Print log data to console")
@@ -60,7 +61,7 @@ def stageparser(parser):
 
     parser.set_defaults(func=cliquesnv)
 
-def cliquesnv(fq1=None,fq2=None,fqU=None,ref_fa=None,outdir='.',jardir='.',O22min=None,O22minfreq=None,printlog=None,single=False,
+def cliquesnv(fq1=None,fq2=None,fqU=None,ref_fa=None,outdir='.',jardir=None,O22min=None,O22minfreq=None,printlog=None,single=False,
               merging=None,fasta_format='extended4',outputstart=None,outputend=None,keep_tmp=False, quiet=False, logfile=None, debug=False,ncpu=1):
 
     # check if paired vs. single
@@ -78,10 +79,16 @@ def cliquesnv(fq1=None,fq2=None,fqU=None,ref_fa=None,outdir='.',jardir='.',O22mi
     sysutils.check_dependency('samtools')
     sysutils.check_dependency('bwa')
 
-    if(os.path.isfile(os.path.join(jardir,"clique-snv.jar"))):
-        print("CliqueSNV JAR file found.")
+    if jardir is None:
+        # jardir was not provided, assume cliquesnv installed from conda
+        USE_JAR = False        
+        sysutils.check_dependency('cliquesnv')
     else:
-        raise MissingRequiredArgument("No JAR file found.")
+        USE_JAR = True
+        if(os.path.isfile(os.path.join(jardir,"clique-snv.jar"))):
+            print("CliqueSNV JAR file found.")
+        else:
+            raise MissingRequiredArgument("No JAR file found.")
 
     # Temporary directory
     tempdir = sysutils.create_tempdir('clique_snv', None, quiet, logfile)
@@ -156,9 +163,18 @@ def cliquesnv(fq1=None,fq2=None,fqU=None,ref_fa=None,outdir='.',jardir='.',O22mi
 
         samfile = os.path.join(tempdir,'aligned.%d.sam' % i)
         method = 'snv-illumina'
-        cmd5 = ['java -jar %s -m %s -in %s -threads %d -outDir %s -fdf %s'
-                % (os.path.join(jardir,'clique-snv.jar'),method,samfile,
-                   ncpu,tempdir,fasta_format)]
+        if USE_JAR:
+            cmd5 = ['java', '-jar', os.path.join(jardir,'clique-snv.jar'), ]
+        else:
+            cmd5 = ['cliquesnv', ]
+        
+        cmd5 += [
+            '-m %s' % method,
+            '-in %s' % samfile,
+            '-threads %d' % ncpu,
+            '-outDir %s' % tempdir,
+            '-fdf %s' % fasta_format,
+        ]
         if O22min is not None:
             cmd5 += ['-t %f' % O22min]
         if O22minfreq is not None:
@@ -174,41 +190,59 @@ def cliquesnv(fq1=None,fq2=None,fqU=None,ref_fa=None,outdir='.',jardir='.',O22mi
         sysutils.command_runner([cmd5, ], stage='clique_snv', quiet=quiet, logfile=logfile, debug=debug)
 
         # copy output file and delete tempdir
-        outname1 = 'aligned.%d.txt' % i
-        outname2 = 'aligned.%d.fasta' % i
-
         os.makedirs(os.path.join(outdir, 'clique_snv/%s' % cs), exist_ok=True)
-        if os.path.exists(os.path.join(tempdir, '%s' % outname1)):
-            shutil.copy(os.path.join(tempdir, '%s' % outname1), os.path.join(outdir,'clique_snv/%s/%s.txt' % (cs,cs)))
-        if os.path.exists(os.path.join(tempdir, '%s' % outname2)):
-            shutil.copy(os.path.join(tempdir, '%s' % outname2), os.path.join(outdir,'clique_snv/%s/%s.fasta' % (cs,cs)))
+        
+        out_txt = os.path.join(outdir,'clique_snv/%s/%s.txt' % (cs,cs))
+        out_fas = os.path.join(outdir,'clique_snv/%s/%s.fasta' % (cs,cs))
+        out_json = os.path.join(outdir,'clique_snv/%s/%s.json' % (cs,cs))
+        out_sum = os.path.join(outdir,'clique_snv/%s/%s_summary.txt' % (cs,cs))
+        
+        if os.path.exists(os.path.join(tempdir, 'aligned.%d.txt' % i)):
+            shutil.copy(os.path.join(tempdir, 'aligned.%d.txt' % i), out_txt)
+        
+        if os.path.exists(os.path.join(tempdir, 'aligned.%d.fasta' % i)):
+            shutil.copy(os.path.join(tempdir, 'aligned.%d.fasta' % i), out_fas)
+        
+        if os.path.exists(os.path.join(tempdir, 'aligned.%d.json' % i)):
+            shutil.copy(os.path.join(tempdir, 'aligned.%d.json' % i), out_json)
 
-
-        # parse output file
-        with open(os.path.join(outdir,'clique_snv/%s/%s_summary.txt' % (cs,cs)),'w') as sumfile, open(os.path.join(outdir,'clique_snv/%s/%s.txt' % (cs,cs)),'r') as infile:
-            l = infile.readlines()
-            freqs = []
-            haps = []
-            tempnum=''
-            for line in l:
-                if "SNV got" in line:
-                    tempnum = line.split(' ')[2]
-                if "frequency" in line:
-                    freqs += [float(line.split(' ')[2][:-2])]
-                if "haplotype=" in line:
-                    haps += [line.split('=')[1][1:-2]]
-            sumfile.write('CliqueSNV_num_hap\t%s\n' % tempnum)
-
-            freq_sqrd = [x ** 2 for x in freqs]
-            freq_sqrd_sum = sum(freq_sqrd)
-            hap_div = ((old_div(7000, (7000 - 1))) * (1 - freq_sqrd_sum))
-            sumfile.write('CliqueSNV_hap_diversity\t%s\n' % hap_div)
-            sumfile.write('CliqueSNV_seq_len\t%s\n' % len(haps[0]))
-
+        # parse output file, may be txt or json
+        if os.path.exists(out_txt):
+            with open(out_sum, 'w') as sumfile, open(out_txt, 'r') as infile:
+                l = infile.readlines()
+                freqs = []
+                haps = []
+                tempnum=''
+                for line in l:
+                    if "SNV got" in line:
+                        tempnum = line.split(' ')[2]
+                    if "frequency" in line:
+                        freqs += [float(line.split(' ')[2][:-2])]
+                    if "haplotype=" in line:
+                        haps += [line.split('=')[1][1:-2]]
+                sumfile.write('CliqueSNV_num_hap\t%s\n' % tempnum)
+    
+                freq_sqrd = [x ** 2 for x in freqs]
+                freq_sqrd_sum = sum(freq_sqrd)
+                hap_div = ((old_div(7000, (7000 - 1))) * (1 - freq_sqrd_sum))
+                sumfile.write('CliqueSNV_hap_diversity\t%s\n' % hap_div)
+                sumfile.write('CliqueSNV_seq_len\t%s\n' % len(haps[0]))
+        elif os.path.exists(out_json):
+            with open(out_sum, 'w') as sumfile, open(out_json, 'r') as infile:
+                dat = json.load(infile)
+                sumfile.write('CliqueSNV_num_hap\t%s\n' % dat['foundHaplotypes'])
+                freqs = [h['frequency'] for h in dat['haplotypes']]
+                freq_sqrd = [x ** 2 for x in freqs]
+                freq_sqrd_sum = sum(freq_sqrd)
+                hap_div = ((old_div(7000, (7000 - 1))) * (1 - freq_sqrd_sum))           
+                sumfile.write('CliqueSNV_hap_diversity\t%f\n' % hap_div)
+                sumfile.write('CliqueSNV_seq_len\t%s\n' % len(dat['haplotypes'][0]['haplotype']))        
+        
         with open(os.path.join(outdir, 'clique_snv/%s/%s.fasta' % (cs, cs)), 'r') as fastafile:
             fastadata=fastafile.read().replace('aligned.%d' % i,rname)
-            with open(os.path.join(outdir, 'clique_snv/%s/%s.fasta' % (cs, cs)), 'w') as newfastafile:
-                newfastafile.write(fastadata)
+        
+        with open(os.path.join(outdir, 'clique_snv/%s/%s.fasta' % (cs, cs)), 'w') as newfastafile:
+            newfastafile.write(fastadata)
 
         i += 1
 
